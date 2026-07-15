@@ -28,6 +28,8 @@
 
 6. 환경변수 저장 후 **Deployments → Redeploy**를 실행합니다.
 
+PDF 분석은 1분 이상 걸릴 수 있습니다. Vercel 프로젝트의 **Settings → Functions**에서 Fluid Compute가 활성화되어 있는지 확인하세요. 이 저장소는 분석 함수의 최대 실행시간을 300초로 설정합니다.
+
 API 키와 접속 코드는 절대로 GitHub 파일에 직접 입력하지 마세요. 예시는 `.env.example`에만 있으며 실제 `.env` 파일은 Git에서 제외됩니다.
 
 ## 사용 방법
