@@ -1,0 +1,12 @@
+{
+  "name": "gaon-eval",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --check api/analyze.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

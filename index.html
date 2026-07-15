@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>평가계획서 자동 검토 시스템</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { font-family: 'Inter', 'Pretendard', sans-serif; background-color: #f8fafc; }
+        .drag-active { border-color: #4f46e5 !important; background-color: #e0e7ff !important; }
+        .spinner { border: 3px solid rgba(255, 255, 255, 0.3); border-radius: 50%; border-top: 3px solid #fff; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Custom Scrollbar for inner content */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        const App = () => {
+            // Document States
+            const [inputText, setInputText] = useState('');
+            const [uploadedFiles, setUploadedFiles] = useState([]);
+            const [isDragging, setIsDragging] = useState(false);
+            
+            // Evaluation Settings (Updated with Year and Semester)
+            const [selectedYear, setSelectedYear] = useState('2026');
+            const [selectedSemester, setSelectedSemester] = useState('2학기');
+            const [isArtsOrVocational, setIsArtsOrVocational] = useState(false);
+            const [isCommonSubject, setIsCommonSubject] = useState(false);
+            const [isElectiveOrLiberalArts, setIsElectiveOrLiberalArts] = useState(false);
+            const [isSeniorSecondSem, setIsSeniorSecondSem] = useState(false);
+            
+            // UI Status
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [result, setResult] = useState(null);
+            const [errorMessage, setErrorMessage] = useState('');
+            const [accessCode, setAccessCode] = useState(() => localStorage.getItem('gaonAccessCode') || '');
+            const fileInputRef = useRef(null);
+
+            // Generate years 2026-2040
+            const years = Array.from({ length: 15 }, (_, i) => (2026 + i).toString());
+
+            const handleDragOver = (e) => {
+                e.preventDefault();
+                setIsDragging(true);
+            };
+
+            const handleDragLeave = (e) => {
+                e.preventDefault();
+                setIsDragging(false);
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const files = Array.from(e.dataTransfer.files);
+                processFiles(files);
+            };
+
+            const handleFileChange = (e) => {
+                const files = Array.from(e.target.files);
+                processFiles(files);
+            };
+
+            const processFiles = (files) => {
+                const validFiles = files.filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+                const maxUploadBytes = 3 * 1024 * 1024;
+                const existingBytes = uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+                let pendingBytes = existingBytes;
+                const acceptedFiles = [];
+                const oversizedFiles = [];
+                validFiles.forEach(file => {
+                    if (pendingBytes + file.size > maxUploadBytes) {
+                        oversizedFiles.push(file);
+                    } else {
+                        acceptedFiles.push(file);
+                        pendingBytes += file.size;
+                    }
+                });
+                
+                if (validFiles.length !== files.length) {
+                    setErrorMessage('이미지(png, jpg) 또는 PDF 파일만 업로드 가능합니다. (hwp, pptx는 PDF로 변환 후 올려주세요)');
+                } else if (oversizedFiles.length > 0) {
+                    setErrorMessage('배포 환경의 전송 한도 때문에 첨부 파일 합계는 3MB 이하여야 합니다. PDF 용량을 줄인 뒤 다시 올려주세요.');
+                } else {
+                    setErrorMessage('');
+                }
+
+                acceptedFiles.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        setUploadedFiles(prev => [...prev, {
+                            id: Math.random().toString(36).substr(2, 9),
+                            name: file.name,
+                            type: file.type,
+                            size: file.size,
+                            base64: e.target.result,
+                            isPdf: file.type === 'application/pdf'
+                        }]);
+                    };
+                    reader.readAsDataURL(file);
+                });
+            };
+
+            const removeFile = (id) => {
+                setUploadedFiles(prev => prev.filter(f => f.id !== id));
+            };
+
+            const analyzePlan = async () => {
+                if (!inputText.trim() && uploadedFiles.length === 0) {
+                    setErrorMessage('분석할 텍스트를 입력하거나 파일을 첨부해주세요.');
+                    return;
+                }
+
+                setIsAnalyzing(true);
+                setErrorMessage('');
+                setResult(null);
+
+                try {
+                    const parts = [];
+                    
+                    if (inputText.trim()) {
+                        parts.push({ text: `다음은 평가계획서 텍스트 내용입니다:\n\n${inputText}` });
+                    }
+
+                    for (const file of uploadedFiles) {
+                        const base64Data = file.base64.split(',')[1];
+                        parts.push({ inlineData: { mimeType: file.type, data: base64Data }, fileName: file.name });
+                    }
+
+                    // System Prompt with 19 new rules integrated perfectly
+                    const systemPrompt = `당신은 학교 교사들의 '교수학습 평가계획서'를 검토하는 AI 수석 교사입니다.
+제공된 텍스트 및 이미지(표)를 분석하여 모든 규정이 완벽히 지켜졌는지 확인하세요.
+
+[현재 문서 검토 설정 환경]
+- 학년도: ${selectedYear}학년도
+- 학기: ${selectedSemester}
+- 예체능/전공 실무: ${isArtsOrVocational ? '예' : '아니오'}
+- 공통과목: ${isCommonSubject ? '예' : '아니오'}
+- 선택/교양과목: ${isElectiveOrLiberalArts ? '예' : '아니오'}
+- 3학년 2학기: ${isSeniorSecondSem ? '예' : '아니오'}
+
+[절대 금지 및 용어 검증 (매우 중요 - 위반시 additionalErrors 에 추가)]
+1. '${selectedSemester}'로 설정되어 있으므로 문서 전체에서 반대 학기(예: 2학기인데 '1학기'라고 적힌 부분)가 있는지 색출.
+2. '지필평가', '지필 평가' 단어 사용 불가. 무조건 '정기시험'으로 작성되어야 함.
+3. '에듀테크 활용수업' 단어 사용 불가. '디지털 기반 수업'으로 작성되어야 함.
+4. 수행평가 영역명에 '(논술형)' 또는 '(논술형 평가)' 표기 불가. (예: '탐구하기(논술형)' -> '탐구하기')
+5. 수업, 평가 연계의 주안점에 '자기평가', '동료평가' 단어 사용 불가.
+
+[비율 및 수학적 합계 검증]
+6. 정기시험 + 수행평가 반영비율의 합은 정확히 100%여야 함.
+7. 수행평가 총 반영 비율은 무조건 30% 이상이어야 함.
+8. 정기시험 및 수행평가 합산 '논술형 비율': 일반 과목 30% 이상, 예체능/전공 실무 20% 이상. (단, 논술형만으로 100% 운영은 지양).
+9. 수행평가 영역별 배점 급간은 영역 만점의 10% 이하여야 하고 균등해야 함. (*중요: 백지활동지, 미참여자, 장기결석자에 대한 감점 또는 별도 점수 부여는 필수 규정이므로, 이를 배점 급간 위반으로 지적하지 말고 예외로 인정할 것*)
+10. 수학적 일치 검증 1: 수행평가 세부 기준 평가 요소에 있는 '만점의 합' = '영역 만점'.
+11. 수학적 일치 검증 2: 평가 요소별 '최하점의 합' = '기본점수'.
+12. 공통과목인 경우: 기본점수는 영역만점의 20% 이상 40% 미만 필수. 최소 성취수준 진술문 작성 확인.
+13. 정기시험을 1회만 실시 시 반영비율 50% 이하. (3학년 2학기는 무조건 1차 정기시험 1회만 실시)
+
+[수행평가 세부 작성 규칙]
+14. 감점 명시 의무: 수행평가 세부 기준 표에 "백지활동지 제출자, 자발적 미참여자는 기본점수에서 1점 감점, 장기 미인정 결석자의 경우는 기본점수에서 2점 감점" 문구가 표기되어 있거나, 이에 준하는 점수(기본점수 기준 -1점, -2점)가 표에 제시되어 있는지 확인. (*이 감점 규정은 올바른 것이므로 절대 급간 배점 위반이나 감점 규정 위반으로 지적하지 말 것*)
+15. 과제형 수행평가 및 암기형 수행평가 불가.
+16. 영역명 작성법: '내용+기능' 형태.
+17. 평가요소 작성법: 지식이해+과정기능을 포함한 '~~하기' 형태. 마지막에 점수 필수 (예: ~~하기(8점)).
+18. 수행 수준(채점 기준) 작성법: 객관적이고 구체적이어야 함. (성취율, 분량, 감점, 지적횟수, 출석률 등의 기준은 지양). 모둠평가 시 개인별 평가방안이 필수며, 모둠평가로 만점을 줄 수 없음. *주의: 14번의 '백지활동지/장기결석자 감점'은 필수 예외 규정이므로, 이를 18번의 '감점 지양' 위반으로 잘못 판단하여 지적하지 말 것.*
+
+[시기 및 계획 연계 검증]
+19. 평가 시기는 구체적인 '주' 단위를 명시해야 함. (예: '9월' 불가, '9월 2주' 필수).
+20. 허용된 평가 시기: 8월(3,4주), 9월(1,2,3,4주), 10월(1,2,3,4,5주), 11월(1,2,3,4주), 12월(1,2,3,4,5주), 1월(1주). 이를 벗어나면 오류.
+21. 수행평가 시행 시기가 12월 1주를 넘어가면 안 됨.
+22. 정기시험 시기 고정: 1차 정기시험은 '10월 3주', 2차 정기시험은 '12월 3주'여야 함.
+23. 정기시험 실시 과목은 '교수학습 운영 계획'에 정기시험 내용이 작성되어 있어야 함.
+24. 모든 평가는 '교수학습 운영 계획'에 명시된 수업 시기보다 '뒤'에 시행되어야 함 (선행평가 금지).
+25. 수업 평가 연계의 주안점에 '학생의 탐구기능을 키우기 위한 주의점' 등이 명확히 서술되어 있는지 확인.
+
+[표 간 교차 검증 및 성취기준 검증]
+26. 문서 앞부분(계획표)의 전체 성취기준이 모두 평가(정기/수행/정의적)에 배정되었는지 대조. 성취기준 나열 시 물결(~) 사용 금지. *중요: '정의적 능력 평가'에 반영된 성취기준도 올바르게 평가된 것이므로 절대 누락(isMissing=true)으로 처리하지 마세요.*
+27. 총괄표(평가의 종류 표)와 수행평가 세부 기준 표 간의 다음 3가지 항목이 띄어쓰기까지 일치해야 함: (평가 영역명, 성취기준, 평가요소).
+28. 모든 성취기준별로 평가기준(성취수준)이 작성되어 있어야 함.
+29. *매우 중요 (환각 방지)*: 표를 읽을 때 문서에 없는 성취기준(예: [12정05-01] 등)을 AI가 임의로 지어내어 추출하거나, 정기시험 표에 없는 코드를 정기시험에 있다고 잘못 연결하지 마세요. 반드시 제공된 텍스트와 이미지에 명시된 성취기준 코드만 있는 그대로 추출해야 합니다.
+
+결과는 반드시 주어진 JSON 스키마를 따르십시오. 마크다운 코드블록 기호는 제외하고 순수 JSON 문자열만 반환하세요.`;
+
+                    const schema = {
+                        type: "OBJECT",
+                        properties: {
+                            "rulesCheck": {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "ruleName": { type: "STRING" },
+                                        "status": { type: "STRING", description: "PASS, FAIL, WARNING, 또는 UNKNOWN" },
+                                        "details": { type: "STRING", description: "검토 결과에 대한 상세 설명" }
+                                    }
+                                }
+                            },
+                            "achievementStandardsTable": {
+                                type: "ARRAY",
+                                description: "단원별/월별 계획 등에서 추출한 전체 성취기준. 지필/수행/정의적 표와 대조하여 하나라도 비어있으면 isMissing=true",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "index": { type: "NUMBER" },
+                                        "code": { type: "STRING" },
+                                        "period": { type: "STRING", description: "평가시기. 누락시 '누락'" },
+                                        "method": { type: "STRING", description: "지필, 수행, 정의적 등. 누락시 '누락'" },
+                                        "isMissing": { type: "BOOLEAN" }
+                                    }
+                                }
+                            },
+                            "additionalErrors": {
+                                type: "ARRAY",
+                                items: { type: "STRING" },
+                                description: "지필평가/에듀테크 단어사용, 1학기/2학기 혼용, 물결기호, 오타, 띄어쓰기 불일치 등 규정에 어긋난 상세 내역 모음"
+                            }
+                        }
+                    };
+
+                    localStorage.setItem('gaonAccessCode', accessCode);
+                    const response = await fetch('/api/analyze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-App-Access-Code': accessCode
+                        },
+                        body: JSON.stringify({ parts, systemPrompt, schema })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.error || `API 통신 오류 (${response.status})`);
+                    }
+
+                    const data = await response.json();
+                    setResult(data);
+
+                } catch (error) {
+                    console.error(error);
+                    setErrorMessage(error.message || "분석 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+                } finally {
+                    setIsAnalyzing(false);
+                }
+            };
+
+            const renderStatusIcon = (status) => {
+                switch (status) {
+                    case 'PASS': return <i className="fa-solid fa-circle-check text-green-500 text-xl"></i>;
+                    case 'FAIL': return <i className="fa-solid fa-circle-xmark text-red-500 text-xl"></i>;
+                    case 'WARNING': return <i className="fa-solid fa-triangle-exclamation text-yellow-500 text-xl"></i>;
+                    default: return <i className="fa-solid fa-circle-question text-gray-400 text-xl"></i>;
+                }
+            };
+
+            const renderStatusBadge = (status) => {
+                switch (status) {
+                    case 'PASS': return <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded border border-green-200">준수</span>;
+                    case 'FAIL': return <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded border border-red-200">위반</span>;
+                    case 'WARNING': return <span className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded border border-yellow-200">주의</span>;
+                    default: return <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded border border-gray-200">확인불가</span>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 p-4 md:p-8 font-sans">
+                    <div className="max-w-[1400px] mx-auto space-y-6">
+                        
+                        {/* Header */}
+                        <div className="bg-white rounded-2xl shadow-sm p-6 border border-indigo-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                            <div className="flex items-center space-x-4">
+                                <div className="bg-indigo-600 p-3 rounded-xl text-white shadow-md">
+                                    <i className="fa-solid fa-microscope text-2xl"></i>
+                                </div>
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-800 tracking-tight">평가계획서 자동 검토 시스템</h1>
+                                    <p className="text-sm text-gray-500 mt-1">최신 AI를 통해 지침(표 간 일치, 학기 확인, 용어 및 띄어쓰기 등) 위반을 검출합니다.</p>
+                                </div>
+                            </div>
+                            <div className="w-full md:w-64">
+                                <label className="block text-xs font-semibold text-gray-500 mb-1">교직원 접속 코드</label>
+                                <input
+                                    type="password"
+                                    value={accessCode}
+                                    onChange={(e) => setAccessCode(e.target.value)}
+                                    placeholder="관리자에게 받은 코드"
+                                    autoComplete="current-password"
+                                    className="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col lg:flex-row gap-6 items-start">
+                            {/* Left Panel: Input */}
+                            <div className="w-full lg:w-[400px] flex flex-col gap-6 sticky top-8">
+                                
+                                {/* Settings */}
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                    <div className="bg-gray-50 px-5 py-4 border-b border-gray-100">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                            <i className="fa-solid fa-sliders text-indigo-500"></i> 검토 설정
+                                        </h3>
+                                    </div>
+                                    <div className="p-5 space-y-4">
+                                        
+                                        {/* Year & Semester Selectors */}
+                                        <div className="grid grid-cols-2 gap-3 mb-2">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-gray-500 mb-1">학년도</label>
+                                                <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 outline-none">
+                                                    {years.map(y => <option key={y} value={y}>{y}학년도</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-gray-500 mb-1">학기</label>
+                                                <select value={selectedSemester} onChange={(e) => setSelectedSemester(e.target.value)} className="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 outline-none">
+                                                    <option value="1학기">1학기</option>
+                                                    <option value="2학기">2학기</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <hr className="border-gray-100" />
+
+                                        {/* Class Types */}
+                                        <div className="space-y-2">
+                                            <label className="flex items-start space-x-3 cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition group">
+                                                <input type="checkbox" checked={isArtsOrVocational} onChange={(e)=>setIsArtsOrVocational(e.target.checked)} className="mt-0.5 form-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300" />
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-gray-700">예체능 및 전공 실무 과목</span>
+                                                    <span className="text-[11px] text-gray-400">논술형 비율 20% 이상 허용</span>
+                                                </div>
+                                            </label>
+                                            <label className="flex items-start space-x-3 cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition group">
+                                                <input type="checkbox" checked={isCommonSubject} onChange={(e)=>setIsCommonSubject(e.target.checked)} className="mt-0.5 form-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300" />
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-gray-700">공통과목</span>
+                                                    <span className="text-[11px] text-indigo-500">기본점수 20~40%미만, 최소성취수준 작성 必</span>
+                                                </div>
+                                            </label>
+                                            <label className="flex items-start space-x-3 cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition group">
+                                                <input type="checkbox" checked={isElectiveOrLiberalArts} onChange={(e)=>setIsElectiveOrLiberalArts(e.target.checked)} className="mt-0.5 form-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300" />
+                                                <span className="text-sm font-medium text-gray-700">선택과목 및 교양과목</span>
+                                            </label>
+                                            <label className="flex items-start space-x-3 cursor-pointer p-2 hover:bg-gray-50 rounded-lg transition group">
+                                                <input type="checkbox" checked={isSeniorSecondSem} onChange={(e)=>setIsSeniorSecondSem(e.target.checked)} className="mt-0.5 form-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300" />
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-gray-700">3학년 2학기 과목</span>
+                                                    <span className="text-[11px] text-gray-400">1차 정기시험 1회만 실시 의무</span>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* File Upload */}
+                                <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+                                    <h3 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                        <i className="fa-regular fa-file-image text-indigo-500"></i> 첨부 파일 (PDF/이미지)
+                                    </h3>
+                                    <p className="text-xs text-gray-500 mb-4 leading-relaxed">평가계획서 파일(PDF)을 올리거나, 한글(hwp)/PPT 표 부분을 캡처해서 붙여넣으세요.</p>
+                                    
+                                    <div 
+                                        className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer ${isDragging ? 'drag-active' : 'border-gray-300 hover:border-indigo-400 bg-gray-50'}`}
+                                        onDragOver={handleDragOver}
+                                        onDragLeave={handleDragLeave}
+                                        onDrop={handleDrop}
+                                        onClick={() => fileInputRef.current.click()}
+                                    >
+                                        <i className="fa-solid fa-cloud-arrow-up text-3xl text-indigo-300 mb-2"></i>
+                                        <p className="text-sm font-medium text-gray-600">클릭하거나 파일 드래그 앤 드롭</p>
+                                        <input type="file" ref={fileInputRef} className="hidden" multiple accept=".pdf,image/png,image/jpeg,image/jpg" onChange={handleFileChange} />
+                                    </div>
+
+                                    {/* Uploaded Files List */}
+                                    {uploadedFiles.length > 0 && (
+                                        <div className="mt-3 space-y-2 max-h-40 overflow-y-auto pr-1">
+                                            {uploadedFiles.map(file => (
+                                                <div key={file.id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+                                                    <div className="flex items-center space-x-3 overflow-hidden">
+                                                        {file.isPdf ? 
+                                                            <i className="fa-regular fa-file-pdf text-red-500 text-lg"></i> : 
+                                                            <img src={file.base64} alt="preview" className="w-6 h-6 object-cover rounded border" />
+                                                        }
+                                                        <span className="text-xs font-medium text-gray-700 truncate">{file.name}</span>
+                                                    </div>
+                                                    <button onClick={() => removeFile(file.id)} className="text-gray-400 hover:text-red-500 p-1 rounded transition">
+                                                        <i className="fa-solid fa-xmark"></i>
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Text Input */}
+                                <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+                                    <h3 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                        <i className="fa-solid fa-align-left text-indigo-500"></i> 직접 텍스트 입력 (선택)
+                                    </h3>
+                                    <textarea 
+                                        className="w-full h-24 border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"
+                                        placeholder="문서 내용 일부를 직접 복사+붙여넣기 할 수 있습니다."
+                                        value={inputText}
+                                        onChange={(e) => setInputText(e.target.value)}
+                                    ></textarea>
+                                </div>
+
+                                {/* Action Button */}
+                                <div className="pb-8">
+                                    {errorMessage && (
+                                        <div className="mb-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-center gap-2 font-medium border border-red-100">
+                                            <i className="fa-solid fa-circle-exclamation"></i> {errorMessage}
+                                        </div>
+                                    )}
+                                    <button 
+                                        onClick={analyzePlan} 
+                                        disabled={isAnalyzing}
+                                        className={`w-full py-4 rounded-xl font-bold text-white text-lg shadow-md transition-all flex justify-center items-center gap-2 ${isAnalyzing ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg active:scale-95'}`}
+                                    >
+                                        {isAnalyzing ? (
+                                            <><div className="spinner"></div> AI가 규정 위반을 찾고 있습니다</>
+                                        ) : (
+                                            <><i className="fa-solid fa-wand-magic-sparkles"></i> 19가지 핵심 지침 자동 검토</>
+                                        )}
+                                    </button>
+                                </div>
+
+                            </div>
+
+                            {/* Right Panel: Results */}
+                            <div className="flex-1 flex flex-col gap-6">
+                                {!result && !isAnalyzing && (
+                                    <div className="h-[600px] bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center p-12 text-center">
+                                        <div className="bg-indigo-50 w-24 h-24 rounded-full flex items-center justify-center mb-6 shadow-inner">
+                                            <i className="fa-solid fa-robot text-4xl text-indigo-300"></i>
+                                        </div>
+                                        <h2 className="text-xl font-bold text-gray-700 mb-2">검토 결과를 대기 중입니다</h2>
+                                        <p className="text-gray-500 text-sm max-w-md leading-relaxed">
+                                            왼쪽 패널에 평가계획서를 첨부하고 검토 버튼을 누르시면, 학기/연도 오기재부터 수식 계산, 띄어쓰기 오타, 평가 시기 모순점까지 AI가 찾아냅니다.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {result && (
+                                    <>
+                                        {/* Additional Errors (Terminology & Typos) - Moved to top for visibility */}
+                                        {result.additionalErrors && result.additionalErrors.length > 0 && (
+                                            <div className="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-l-red-500 border-y border-r border-gray-100">
+                                                <h3 className="text-lg font-bold text-red-700 mb-4 pb-2 border-b border-red-100 flex items-center gap-2">
+                                                    <i className="fa-solid fa-spell-check text-red-500"></i> 주요 지적사항 (금지어, 오타, 양식오류)
+                                                </h3>
+                                                <ul className="space-y-3">
+                                                    {result.additionalErrors.map((err, idx) => (
+                                                        <li key={idx} className="flex items-start gap-3 text-sm text-gray-700 p-3 bg-red-50/50 rounded-lg">
+                                                            <i className="fa-solid fa-thumbtack text-red-400 mt-0.5"></i>
+                                                            <span className="leading-relaxed">{err}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+
+                                        {/* Rules Verification */}
+                                        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                                            <h3 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b flex items-center gap-2">
+                                                <i className="fa-solid fa-list-check text-indigo-600"></i> 상세 규정 준수 내역
+                                            </h3>
+                                            <div className="grid gap-4 md:grid-cols-2">
+                                                {result.rulesCheck.map((rule, idx) => (
+                                                    <div key={idx} className="flex items-start gap-4 p-4 rounded-xl bg-gray-50 border border-gray-100 hover:bg-white hover:shadow-md transition duration-200">
+                                                        <div className="mt-0.5">{renderStatusIcon(rule.status)}</div>
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <h4 className="font-bold text-gray-800 text-sm">{rule.ruleName}</h4>
+                                                                {renderStatusBadge(rule.status)}
+                                                            </div>
+                                                            <p className="text-xs text-gray-600 leading-relaxed">{rule.details}</p>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Achievement Standards Table */}
+                                        <div className="bg-white rounded-2xl shadow-sm p-0 border border-gray-100 overflow-hidden flex flex-col">
+                                            <div className="p-6 border-b border-gray-100 bg-white">
+                                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                                    <i className="fa-solid fa-table text-indigo-600"></i> 성취기준 평가 반영 대조표
+                                                </h3>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    교수학습 계획의 전체 성취기준과 지필/수행/정의적 평가표를 대조합니다. '누락' 뱃지가 있다면 평가표에 배정되지 않은 것입니다.
+                                                </p>
+                                            </div>
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-left border-collapse">
+                                                    <thead>
+                                                        <tr className="bg-gray-50 text-gray-700 text-xs uppercase tracking-wider">
+                                                            <th className="p-4 font-bold border-b border-gray-200 w-16">순번</th>
+                                                            <th className="p-4 font-bold border-b border-gray-200">성취기준</th>
+                                                            <th className="p-4 font-bold border-b border-gray-200">평가 시기</th>
+                                                            <th className="p-4 font-bold border-b border-gray-200">평가 방법</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="text-sm">
+                                                        {result.achievementStandardsTable && result.achievementStandardsTable.length > 0 ? (
+                                                            result.achievementStandardsTable.map((row, idx) => (
+                                                                <tr key={idx} className={`border-b border-gray-100 hover:bg-gray-50 transition ${row.isMissing ? 'bg-red-50/30' : ''}`}>
+                                                                    <td className="p-4 text-gray-500 text-center">{row.index || (idx + 1)}</td>
+                                                                    <td className="p-4 font-semibold text-gray-800">
+                                                                        {row.code}
+                                                                        {row.isMissing && (
+                                                                            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+                                                                                <i className="fa-solid fa-triangle-exclamation"></i> 누락
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className={`p-4 ${row.isMissing || row.period === '누락' ? 'text-red-500 font-medium' : 'text-gray-600'}`}>
+                                                                        {row.period}
+                                                                    </td>
+                                                                    <td className={`p-4 ${row.isMissing || row.method === '누락' ? 'text-red-500 font-medium' : 'text-gray-600'}`}>
+                                                                        {row.method}
+                                                                    </td>
+                                                                </tr>
+                                                            ))
+                                                        ) : (
+                                                            <tr>
+                                                                <td colSpan="4" className="p-12 text-center text-gray-400">
+                                                                    <i className="fa-solid fa-file-circle-xmark text-3xl mb-3"></i>
+                                                                    <br/>추출된 성취기준 정보가 없습니다. 문서를 다시 확인해주세요.
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
