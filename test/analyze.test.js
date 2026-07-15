@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTaskSchema, extractMessageText, parseStructuredContent } from '../api/analyze.js';
+import { buildTaskSchema, extractMessageText, parseStructuredContent, validateAdditionalErrors } from '../api/analyze.js';
 
 const sample = {
   rulesCheck: [],
@@ -48,4 +48,19 @@ test('전체 스키마에서 작업별 필드만 분리한다', () => {
   assert.deepEqual(taskSchema.required, ['rulesCheck', 'additionalErrors']);
   assert.deepEqual(Object.keys(taskSchema.properties), ['rulesCheck', 'additionalErrors']);
   assert.equal(taskSchema.additionalProperties, false);
+});
+
+test('원문에 없는 인용과 실제 횟수를 넘는 중복을 제거한다', () => {
+  const source = '방침에는 정기고사라는 표현이 한 번 있습니다.';
+  const items = [
+    { message: '용어 확인', quote: '정기고사', location: '방침 1항' },
+    { message: '중복 환각', quote: '정기고사', location: '총괄표' },
+    { message: '없는 인용', quote: '지필평가', location: '평가표' }
+  ];
+  assert.deepEqual(validateAdditionalErrors(items, source), [items[0]]);
+});
+
+test('PDF처럼 원문 텍스트가 없을 때도 인용과 위치를 필수로 요구한다', () => {
+  const valid = { message: '용어 확인', quote: '정기고사', location: '7페이지 방침 1항' };
+  assert.deepEqual(validateAdditionalErrors([valid, { message: '증거 없음', quote: '', location: '' }]), [valid]);
 });

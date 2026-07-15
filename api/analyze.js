@@ -118,6 +118,42 @@ export function buildTaskSchema(schema, keys) {
   return normalizeSchema({ type: 'OBJECT', properties: selectedProperties });
 }
 
+function normalizeEvidenceText(value) {
+  return String(value || '').replace(/\s+/g, '').trim();
+}
+
+function countOccurrences(source, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  let cursor = 0;
+  while ((cursor = source.indexOf(needle, cursor)) !== -1) {
+    count += 1;
+    cursor += needle.length;
+  }
+  return count;
+}
+
+export function validateAdditionalErrors(items, sourceText = '') {
+  if (!Array.isArray(items)) return [];
+  const normalizedSource = normalizeEvidenceText(sourceText);
+  const acceptedByQuote = new Map();
+
+  return items.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    if (!item.message?.trim() || !item.quote?.trim() || !item.location?.trim()) return false;
+
+    const normalizedQuote = normalizeEvidenceText(item.quote);
+    if (!normalizedQuote) return false;
+    if (!normalizedSource) return true;
+
+    const actualCount = countOccurrences(normalizedSource, normalizedQuote);
+    const acceptedCount = acceptedByQuote.get(normalizedQuote) || 0;
+    if (actualCount <= acceptedCount) return false;
+    acceptedByQuote.set(normalizedQuote, acceptedCount + 1);
+    return true;
+  });
+}
+
 class AnalysisTaskError extends Error {
   constructor(message, status = 502) {
     super(message);
@@ -236,7 +272,7 @@ export default async function handler(request, response) {
         hasPdf,
         schema: rulesSchema,
         maxTokens: 12000,
-        taskInstruction: '명시된 규칙만 검토하고 평가 균형, 교육적 타당성, 내용+기능 형태 등 목록 밖의 판단은 하지 마세요. 수행평가 배점은 영역 만점×10%로 허용 간격을 계산하고 각 평가요소 내부만 검사하며, 서로 다른 평가요소의 간격은 같을 필요가 없습니다. 기본점수는 아무것도 하지 않은 학생의 최소점수이므로 다른 점수와 합산하지 마세요. 기본점수 9점·미참여 8점·장기 미인정 결석 7점 구조는 정상입니다. rulesCheck에는 잘 작성된 PASS와 확인이 필요한 WARNING/UNKNOWN/FAIL을 모두 출력하세요. 강한 표현 대신 확인 필요·검토 권장으로 작성하고, additionalErrors는 rulesCheck와 중복되지 않는 금지어·오타·양식 오류만 출력하세요. achievementStandardsTable은 출력하지 마세요.'
+        taskInstruction: '명시된 규칙만 검토하고 평가 균형, 교육적 타당성, 내용+기능 형태 등 목록 밖의 판단은 하지 마세요. 수행평가 배점은 영역 만점×10%로 허용 간격을 계산하고 각 평가요소 내부만 검사하며, 서로 다른 평가요소의 간격은 같을 필요가 없습니다. 기본점수는 아무것도 하지 않은 학생의 최소점수이므로 다른 점수와 합산하지 마세요. 기본점수 9점·미참여 8점·장기 미인정 결석 7점 구조는 정상입니다. rulesCheck에는 잘 작성된 PASS와 확인이 필요한 WARNING/UNKNOWN/FAIL을 모두 출력하세요. additionalErrors는 rulesCheck와 중복되지 않는 금지어·오타·양식 오류만 출력하고, 각 항목에 문서에서 그대로 복사한 연속된 원문 인용과 실제 페이지·표·항목 위치를 반드시 넣으세요. 정확히 인용할 수 없는 내용은 절대 additionalErrors에 넣지 말고, 동일한 원문 한 번을 여러 위치에 있다고 반복하지 마세요. achievementStandardsTable은 출력하지 마세요.'
       }),
       runAnalysisTask({
         label: 'standards',
@@ -249,10 +285,14 @@ export default async function handler(request, response) {
       })
     ]);
 
+    const sourceText = parts
+      .filter((part) => typeof part?.text === 'string')
+      .map((part) => part.text.replace(/^다음은 평가계획서 텍스트 내용입니다:\s*/u, ''))
+      .join('\n');
     const parsed = {
       rulesCheck: rulesResult?.rulesCheck,
       achievementStandardsTable: standardsResult?.achievementStandardsTable,
-      additionalErrors: rulesResult?.additionalErrors
+      additionalErrors: validateAdditionalErrors(rulesResult?.additionalErrors, sourceText)
     };
     if (!Array.isArray(parsed.rulesCheck) || !Array.isArray(parsed.achievementStandardsTable) || !Array.isArray(parsed.additionalErrors)) {
       return response.status(502).json({ error: 'Gemini 응답에 필요한 검토 결과 항목이 빠져 있습니다. 다시 시도해주세요.' });

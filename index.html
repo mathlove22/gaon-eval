@@ -231,7 +231,14 @@
                             },
                             "additionalErrors": {
                                 type: "ARRAY",
-                                items: { type: "STRING" },
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        "message": { type: "STRING", description: "확인이 필요한 내용. 온화하고 간결하게 작성" },
+                                        "quote": { type: "STRING", description: "문서에서 글자 그대로 복사한 연속된 원문. 요약이나 바꿔 쓰기 금지" },
+                                        "location": { type: "STRING", description: "페이지 번호와 표·절·항목명 등 실제 위치" }
+                                    }
+                                },
                                 description: "rulesCheck와 중복되지 않는 금지어, 학기 혼용, 명확한 오타와 양식 오류만 간결하게 기록. 평가 균형이나 교육적 타당성 등 목록에 없는 판단은 금지"
                             }
                         }
@@ -470,7 +477,11 @@
                                                     {result.additionalErrors.map((err, idx) => (
                                                         <li key={idx} className="flex items-start gap-3 text-sm text-gray-700 p-3 bg-amber-50/50 rounded-lg">
                                                             <i className="fa-solid fa-thumbtack text-amber-400 mt-0.5"></i>
-                                                            <span className="leading-relaxed">{err}</span>
+                                                            <div className="leading-relaxed">
+                                                                <p>{err.message}</p>
+                                                                <p className="mt-1 text-xs text-gray-500"><strong>위치:</strong> {err.location}</p>
+                                                                <blockquote className="mt-1 border-l-2 border-amber-300 pl-2 text-xs text-gray-600">“{err.quote}”</blockquote>
+                                                            </div>
                                                         </li>
                                                     ))}
                                                 </ul>
