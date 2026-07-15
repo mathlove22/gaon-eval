@@ -245,7 +245,7 @@ export default async function handler(request, response) {
         hasPdf,
         schema: standardsSchema,
         maxTokens: 16000,
-        taskInstruction: '성취기준 평가 반영 대조표만 분석하세요. 문서에 실제로 적힌 성취기준 코드, 평가 시기, 정기고사·수행평가·정의적 영역 배정 여부와 누락 여부만 간결하게 출력하세요. rulesCheck와 additionalErrors는 출력하지 마세요.'
+        taskInstruction: '성취기준 평가 반영 대조표만 분석하세요. 정의적 영역 표를 반드시 별도로 끝까지 확인하고, 그 안의 12정05-01·12정05-02·12정05-03을 포함해 문서에 실제로 적힌 모든 성취기준을 추출하세요. 각 코드의 평가 시기와 정기시험·수행평가·정의적 영역 배정 여부를 판정하되, 정의적 영역에 있으면 절대 누락 처리하지 마세요. rulesCheck와 additionalErrors는 출력하지 마세요.'
       })
     ]);
 
