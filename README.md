@@ -1,6 +1,6 @@
 # 가온고 평가계획서 자동 검토 시스템
 
-평가계획서의 PDF·이미지·텍스트를 OpenRouter를 통해 Gemini 3.5 Flash로 검토하는 웹 앱입니다.
+평가계획서의 PDF·이미지·텍스트를 OpenRouter를 통해 Gemini 3 Flash Preview로 검토하는 웹 앱입니다.
 
 ## 보안 구조
 
@@ -23,7 +23,7 @@
 | --- | --- |
 | `OPENROUTER_API_KEY` | OpenRouter에서 만든 `sk-or-v1-...` 키 |
 | `APP_ACCESS_CODE` | 선생님들에게 따로 전달할 긴 접속 코드 |
-| `OPENROUTER_MODEL` | `google/gemini-3.5-flash` |
+| `OPENROUTER_MODEL` | `google/gemini-3-flash-preview` |
 | `PUBLIC_SITE_URL` | Vercel 배포 주소 |
 
 6. 환경변수 저장 후 **Deployments → Redeploy**를 실행합니다.
