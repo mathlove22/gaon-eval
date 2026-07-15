@@ -107,6 +107,97 @@ export function parseStructuredContent(content) {
   throw new SyntaxError('유효한 JSON 객체를 찾지 못했습니다.');
 }
 
+export function buildTaskSchema(schema, keys) {
+  const properties = schema?.properties || {};
+  const selectedProperties = Object.fromEntries(
+    keys.filter((key) => properties[key]).map((key) => [key, properties[key]])
+  );
+  if (Object.keys(selectedProperties).length !== keys.length) {
+    throw new Error('분석 결과 스키마에 필요한 항목이 없습니다.');
+  }
+  return normalizeSchema({ type: 'OBJECT', properties: selectedProperties });
+}
+
+class AnalysisTaskError extends Error {
+  constructor(message, status = 502) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function runAnalysisTask({ label, content, systemPrompt, taskInstruction, schema, hasPdf, maxTokens }) {
+  const plugins = [{ id: 'response-healing' }];
+  if (hasPdf) plugins.push({ id: 'file-parser', pdf: { engine: 'native' } });
+
+  const payload = {
+    model: process.env.OPENROUTER_MODEL || DEFAULT_MODEL,
+    messages: [
+      { role: 'system', content: `${systemPrompt}\n\n[이번 요청의 출력 범위]\n${taskInstruction}` },
+      { role: 'user', content }
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: `evaluation_plan_${label}`,
+        strict: true,
+        schema
+      }
+    },
+    reasoning: { effort: 'medium' },
+    temperature: 0,
+    max_tokens: maxTokens,
+    stream: false,
+    plugins
+  };
+
+  const openRouterResponse = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.PUBLIC_SITE_URL || 'https://github.com/mathlove22/gaon-eval',
+      'X-Title': 'Gaon High School Evaluation Plan Reviewer'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await openRouterResponse.json().catch(() => ({}));
+  if (!openRouterResponse.ok) {
+    const message = data?.error?.message || `OpenRouter ${label} 요청 실패 (${openRouterResponse.status})`;
+    throw new AnalysisTaskError(message, openRouterResponse.status);
+  }
+
+  const choice = data?.choices?.[0];
+  const rawContent = choice?.message?.content;
+  if (!rawContent) throw new AnalysisTaskError(`${label} 분석에서 Gemini가 빈 응답을 반환했습니다.`);
+
+  if (choice.finish_reason === 'length') {
+    console.warn('OpenRouter task response truncated', {
+      label,
+      requestId: data?.id,
+      model: data?.model,
+      provider: data?.provider
+    });
+    throw new AnalysisTaskError(`${label} 분석 결과가 너무 길어 출력이 중단되었습니다.`);
+  }
+
+  try {
+    return parseStructuredContent(rawContent);
+  } catch (parseError) {
+    console.error('Structured task response parsing failed', {
+      label,
+      requestId: data?.id,
+      model: data?.model,
+      provider: data?.provider,
+      finishReason: choice?.finish_reason,
+      contentType: Array.isArray(rawContent) ? 'array' : typeof rawContent,
+      contentLength: typeof rawContent === 'string' ? rawContent.length : undefined,
+      message: parseError.message
+    });
+    throw new AnalysisTaskError(`${label} 분석 결과의 JSON 자동 복구에 실패했습니다.`);
+  }
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -133,89 +224,44 @@ export default async function handler(request, response) {
 
     const content = toOpenRouterContent(parts);
     const hasPdf = parts.some((part) => part?.inlineData?.mimeType === 'application/pdf');
-    const payload = {
-      model: process.env.OPENROUTER_MODEL || DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content }
-      ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'evaluation_plan_review',
-          strict: true,
-          schema: normalizeSchema(schema)
-        }
-      },
-      reasoning: { effort: 'medium' },
-      temperature: 0,
-      max_tokens: 16000,
-      stream: false
+    const rulesSchema = buildTaskSchema(schema, ['rulesCheck', 'additionalErrors']);
+    const standardsSchema = buildTaskSchema(schema, ['achievementStandardsTable']);
+
+    const [rulesResult, standardsResult] = await Promise.all([
+      runAnalysisTask({
+        label: 'rules',
+        content,
+        systemPrompt,
+        hasPdf,
+        schema: rulesSchema,
+        maxTokens: 8000,
+        taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. rulesCheck의 details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
+      }),
+      runAnalysisTask({
+        label: 'standards',
+        content,
+        systemPrompt,
+        hasPdf,
+        schema: standardsSchema,
+        maxTokens: 12000,
+        taskInstruction: '성취기준 평가 반영 대조표만 분석하세요. 문서에 실제로 적힌 성취기준 코드, 평가 시기, 정기고사·수행평가·정의적 영역 배정 여부와 누락 여부만 간결하게 출력하세요. rulesCheck와 additionalErrors는 출력하지 마세요.'
+      })
+    ]);
+
+    const parsed = {
+      rulesCheck: rulesResult?.rulesCheck,
+      achievementStandardsTable: standardsResult?.achievementStandardsTable,
+      additionalErrors: rulesResult?.additionalErrors
     };
-
-    payload.plugins = [{ id: 'response-healing' }];
-    if (hasPdf) {
-      payload.plugins.push({ id: 'file-parser', pdf: { engine: 'native' } });
-    }
-
-    const openRouterResponse = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.PUBLIC_SITE_URL || 'https://github.com/mathlove22/gaon-eval',
-        'X-Title': 'Gaon High School Evaluation Plan Reviewer'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await openRouterResponse.json().catch(() => ({}));
-    if (!openRouterResponse.ok) {
-      const message = data?.error?.message || `OpenRouter 요청 실패 (${openRouterResponse.status})`;
-      return response.status(openRouterResponse.status).json({ error: message });
-    }
-
-    const choice = data?.choices?.[0];
-    const rawContent = choice?.message?.content;
-    if (!rawContent) {
-      return response.status(502).json({ error: 'Gemini가 빈 응답을 반환했습니다.' });
-    }
-
-    if (choice.finish_reason === 'length') {
-      console.warn('OpenRouter response truncated', {
-        requestId: data?.id,
-        model: data?.model,
-        provider: data?.provider
-      });
-      return response.status(502).json({
-        error: '검토 결과가 너무 길어 출력이 중단되었습니다. PDF를 나누거나 필요한 부분만 올려 다시 시도해주세요.'
-      });
-    }
-
-    let parsed;
-    try {
-      parsed = parseStructuredContent(rawContent);
-    } catch (parseError) {
-      console.error('Structured response parsing failed', {
-        requestId: data?.id,
-        model: data?.model,
-        provider: data?.provider,
-        finishReason: choice?.finish_reason,
-        contentType: Array.isArray(rawContent) ? 'array' : typeof rawContent,
-        contentLength: typeof rawContent === 'string' ? rawContent.length : undefined,
-        message: parseError.message
-      });
-      return response.status(502).json({
-        error: 'Gemini가 완전한 JSON 형식으로 응답하지 않았습니다. 자동 복구에도 실패했습니다. 잠시 후 다시 시도해주세요.'
-      });
-    }
-
-    if (!parsed || !Array.isArray(parsed.rulesCheck) || !Array.isArray(parsed.achievementStandardsTable) || !Array.isArray(parsed.additionalErrors)) {
+    if (!Array.isArray(parsed.rulesCheck) || !Array.isArray(parsed.achievementStandardsTable) || !Array.isArray(parsed.additionalErrors)) {
       return response.status(502).json({ error: 'Gemini 응답에 필요한 검토 결과 항목이 빠져 있습니다. 다시 시도해주세요.' });
     }
     return response.status(200).json(parsed);
   } catch (error) {
     console.error('Evaluation analysis failed:', error);
+    if (error instanceof AnalysisTaskError) {
+      return response.status(error.status).json({ error: error.message });
+    }
     const message = error instanceof SyntaxError
       ? 'Gemini 응답을 JSON으로 해석하지 못했습니다. 다시 시도해주세요.'
       : error.message || '검토 중 서버 오류가 발생했습니다.';

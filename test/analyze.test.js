@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractMessageText, parseStructuredContent } from '../api/analyze.js';
+import { buildTaskSchema, extractMessageText, parseStructuredContent } from '../api/analyze.js';
 
 const sample = {
   rulesCheck: [],
@@ -32,4 +32,20 @@ test('이중 인코딩된 JSON 문자열을 처리한다', () => {
 
 test('불완전한 JSON은 명확하게 거부한다', () => {
   assert.throws(() => parseStructuredContent('{"rulesCheck": ['), SyntaxError);
+});
+
+test('전체 스키마에서 작업별 필드만 분리한다', () => {
+  const fullSchema = {
+    type: 'OBJECT',
+    properties: {
+      rulesCheck: { type: 'ARRAY', items: { type: 'STRING' } },
+      achievementStandardsTable: { type: 'ARRAY', items: { type: 'STRING' } },
+      additionalErrors: { type: 'ARRAY', items: { type: 'STRING' } }
+    }
+  };
+  const taskSchema = buildTaskSchema(fullSchema, ['rulesCheck', 'additionalErrors']);
+  assert.equal(taskSchema.type, 'object');
+  assert.deepEqual(taskSchema.required, ['rulesCheck', 'additionalErrors']);
+  assert.deepEqual(Object.keys(taskSchema.properties), ['rulesCheck', 'additionalErrors']);
+  assert.equal(taskSchema.additionalProperties, false);
 });
