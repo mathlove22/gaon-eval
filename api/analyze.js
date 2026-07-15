@@ -236,7 +236,7 @@ export default async function handler(request, response) {
         hasPdf,
         schema: rulesSchema,
         maxTokens: 12000,
-        taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. rulesCheck의 details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
+        taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. 수행평가 배점은 각 평가요소 최고점이 영역 만점의 10%를 초과하는지 요소별로 계산하고, 각 요소 안의 점수 단계가 동간격인지도 별도로 확인하세요. rulesCheck의 details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
       }),
       runAnalysisTask({
         label: 'standards',
