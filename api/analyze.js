@@ -236,7 +236,7 @@ export default async function handler(request, response) {
         hasPdf,
         schema: rulesSchema,
         maxTokens: 12000,
-        taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. 수행평가 배점은 영역 만점×10%로 허용 간격을 먼저 계산한 뒤, 각 평가요소의 일반 배점 인접 차이가 모두 같고 허용 간격 이하인지 숫자로 검산하세요. 평가요소 만점의 10%나 최고점 자체를 간격 기준으로 사용하면 안 됩니다. 계산 근거가 불명확하면 FAIL이 아니라 UNKNOWN입니다. rulesCheck에는 PASS 항목을 넣지 말고 FAIL, WARNING, UNKNOWN만 출력하세요. details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
+        taskInstruction: '명시된 규칙만 검토하고 평가 균형, 교육적 타당성, 내용+기능 형태 등 목록 밖의 판단은 하지 마세요. 수행평가 배점은 영역 만점×10%로 허용 간격을 계산하고 각 평가요소 내부만 검사하며, 서로 다른 평가요소의 간격은 같을 필요가 없습니다. 기본점수는 아무것도 하지 않은 학생의 최소점수이므로 다른 점수와 합산하지 마세요. 기본점수 9점·미참여 8점·장기 미인정 결석 7점 구조는 정상입니다. rulesCheck에는 잘 작성된 PASS와 확인이 필요한 WARNING/UNKNOWN/FAIL을 모두 출력하세요. 강한 표현 대신 확인 필요·검토 권장으로 작성하고, additionalErrors는 rulesCheck와 중복되지 않는 금지어·오타·양식 오류만 출력하세요. achievementStandardsTable은 출력하지 마세요.'
       }),
       runAnalysisTask({
         label: 'standards',
