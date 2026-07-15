@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --check api/analyze.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"

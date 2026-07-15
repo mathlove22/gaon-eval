@@ -59,6 +59,54 @@ function safeEqual(left, right) {
   return difference === 0;
 }
 
+export function extractMessageText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (typeof part?.text === 'string') return part.text;
+        if (typeof part?.content === 'string') return part.content;
+        return '';
+      })
+      .join('')
+      .trim();
+  }
+  if (content && typeof content === 'object') return content;
+  return '';
+}
+
+export function parseStructuredContent(content) {
+  const extracted = extractMessageText(content);
+  if (extracted && typeof extracted === 'object') return extracted;
+  if (typeof extracted !== 'string' || !extracted.trim()) {
+    throw new SyntaxError('응답 내용이 비어 있습니다.');
+  }
+
+  const trimmed = extracted.trim();
+  const candidates = [trimmed];
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch?.[1]) candidates.push(fenceMatch[1].trim());
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed === 'string') return JSON.parse(parsed);
+      return parsed;
+    } catch {
+      // 다음 후보 형식을 시도한다.
+    }
+  }
+
+  throw new SyntaxError('유효한 JSON 객체를 찾지 못했습니다.');
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -100,13 +148,14 @@ export default async function handler(request, response) {
         }
       },
       reasoning: { effort: 'medium' },
-      temperature: 0.1,
-      max_tokens: 12000,
+      temperature: 0,
+      max_tokens: 16000,
       stream: false
     };
 
+    payload.plugins = [{ id: 'response-healing' }];
     if (hasPdf) {
-      payload.plugins = [{ id: 'file-parser', pdf: { engine: 'native' } }];
+      payload.plugins.push({ id: 'file-parser', pdf: { engine: 'native' } });
     }
 
     const openRouterResponse = await fetch(OPENROUTER_URL, {
@@ -126,12 +175,44 @@ export default async function handler(request, response) {
       return response.status(openRouterResponse.status).json({ error: message });
     }
 
-    const rawContent = data?.choices?.[0]?.message?.content;
+    const choice = data?.choices?.[0];
+    const rawContent = choice?.message?.content;
     if (!rawContent) {
       return response.status(502).json({ error: 'Gemini가 빈 응답을 반환했습니다.' });
     }
 
-    const parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
+    if (choice.finish_reason === 'length') {
+      console.warn('OpenRouter response truncated', {
+        requestId: data?.id,
+        model: data?.model,
+        provider: data?.provider
+      });
+      return response.status(502).json({
+        error: '검토 결과가 너무 길어 출력이 중단되었습니다. PDF를 나누거나 필요한 부분만 올려 다시 시도해주세요.'
+      });
+    }
+
+    let parsed;
+    try {
+      parsed = parseStructuredContent(rawContent);
+    } catch (parseError) {
+      console.error('Structured response parsing failed', {
+        requestId: data?.id,
+        model: data?.model,
+        provider: data?.provider,
+        finishReason: choice?.finish_reason,
+        contentType: Array.isArray(rawContent) ? 'array' : typeof rawContent,
+        contentLength: typeof rawContent === 'string' ? rawContent.length : undefined,
+        message: parseError.message
+      });
+      return response.status(502).json({
+        error: 'Gemini가 완전한 JSON 형식으로 응답하지 않았습니다. 자동 복구에도 실패했습니다. 잠시 후 다시 시도해주세요.'
+      });
+    }
+
+    if (!parsed || !Array.isArray(parsed.rulesCheck) || !Array.isArray(parsed.achievementStandardsTable) || !Array.isArray(parsed.additionalErrors)) {
+      return response.status(502).json({ error: 'Gemini 응답에 필요한 검토 결과 항목이 빠져 있습니다. 다시 시도해주세요.' });
+    }
     return response.status(200).json(parsed);
   } catch (error) {
     console.error('Evaluation analysis failed:', error);
