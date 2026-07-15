@@ -73,12 +73,12 @@ export default async function handler(request, response) {
     return response.status(500).json({ error: '서버에 교직원 접속 코드가 설정되지 않았습니다.' });
   }
 
-  if (!safeEqual(request.headers['x-app-access-code'], process.env.APP_ACCESS_CODE)) {
-    return response.status(401).json({ error: '교직원 접속 코드가 올바르지 않습니다.' });
-  }
-
   try {
-    const { parts, systemPrompt, schema } = request.body || {};
+    const { parts, systemPrompt, schema, accessCode } = request.body || {};
+    if (!safeEqual(accessCode, process.env.APP_ACCESS_CODE)) {
+      return response.status(401).json({ error: '교직원 접속 코드가 올바르지 않습니다.' });
+    }
+
     if (!Array.isArray(parts) || !parts.length || typeof systemPrompt !== 'string' || !schema) {
       return response.status(400).json({ error: '검토 요청 데이터가 올바르지 않습니다.' });
     }

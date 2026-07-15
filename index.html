@@ -240,11 +240,8 @@
                     localStorage.setItem('gaonAccessCode', accessCode);
                     const response = await fetch('/api/analyze', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-App-Access-Code': accessCode
-                        },
-                        body: JSON.stringify({ parts, systemPrompt, schema })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ parts, systemPrompt, schema, accessCode })
                     });
 
                     if (!response.ok) {
