@@ -236,7 +236,7 @@ export default async function handler(request, response) {
         hasPdf,
         schema: rulesSchema,
         maxTokens: 12000,
-        taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. 수행평가에서는 평가요소별 최고점 합이 영역 만점과 일치하는지 확인하세요. 각 평가요소 안의 인접 배점 간격이 모두 동간격인지, 그 간격이 영역 만점의 10% 이하인지 계산하세요. 평가요소 최고점 자체의 크기는 오류 기준이 아닙니다. rulesCheck의 details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
+        taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. 수행평가 배점은 영역 만점×10%로 허용 간격을 먼저 계산한 뒤, 각 평가요소의 일반 배점 인접 차이가 모두 같고 허용 간격 이하인지 숫자로 검산하세요. 평가요소 만점의 10%나 최고점 자체를 간격 기준으로 사용하면 안 됩니다. 계산 근거가 불명확하면 FAIL이 아니라 UNKNOWN입니다. rulesCheck에는 PASS 항목을 넣지 말고 FAIL, WARNING, UNKNOWN만 출력하세요. details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
       }),
       runAnalysisTask({
         label: 'standards',
