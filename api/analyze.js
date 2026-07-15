@@ -143,7 +143,7 @@ async function runAnalysisTask({ label, content, systemPrompt, taskInstruction, 
         schema
       }
     },
-    reasoning: { effort: 'medium' },
+    reasoning: { effort: 'minimal', exclude: true },
     temperature: 0,
     max_tokens: maxTokens,
     stream: false,
@@ -176,7 +176,8 @@ async function runAnalysisTask({ label, content, systemPrompt, taskInstruction, 
       label,
       requestId: data?.id,
       model: data?.model,
-      provider: data?.provider
+      provider: data?.provider,
+      usage: data?.usage
     });
     throw new AnalysisTaskError(`${label} 분석 결과가 너무 길어 출력이 중단되었습니다.`);
   }
@@ -234,7 +235,7 @@ export default async function handler(request, response) {
         systemPrompt,
         hasPdf,
         schema: rulesSchema,
-        maxTokens: 8000,
+        maxTokens: 12000,
         taskInstruction: '규정 준수 결과와 추가 오류만 분석하세요. rulesCheck의 details는 항목당 최대 2문장, additionalErrors는 오류당 1문장으로 간결하게 작성하세요. achievementStandardsTable은 출력하지 마세요.'
       }),
       runAnalysisTask({
@@ -243,7 +244,7 @@ export default async function handler(request, response) {
         systemPrompt,
         hasPdf,
         schema: standardsSchema,
-        maxTokens: 12000,
+        maxTokens: 16000,
         taskInstruction: '성취기준 평가 반영 대조표만 분석하세요. 문서에 실제로 적힌 성취기준 코드, 평가 시기, 정기고사·수행평가·정의적 영역 배정 여부와 누락 여부만 간결하게 출력하세요. rulesCheck와 additionalErrors는 출력하지 마세요.'
       })
     ]);
