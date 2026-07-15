@@ -1,5 +1,5 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'google/gemini-3-flash-preview';
+const DEFAULT_MODEL = 'google/gemini-3.5-flash';
 
 function normalizeSchema(value) {
   if (Array.isArray(value)) return value.map(normalizeSchema);
@@ -99,7 +99,7 @@ export default async function handler(request, response) {
           schema: normalizeSchema(schema)
         }
       },
-      reasoning: { effort: 'low' },
+      reasoning: { effort: 'medium' },
       temperature: 0.1,
       max_tokens: 12000,
       stream: false
