@@ -115,7 +115,7 @@ export default async function handler(request, response) {
         Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': process.env.PUBLIC_SITE_URL || 'https://github.com/mathlove22/gaon-eval',
-        'X-Title': '가온고 평가계획서 검토 시스템'
+        'X-Title': 'Gaon High School Evaluation Plan Reviewer'
       },
       body: JSON.stringify(payload)
     });
